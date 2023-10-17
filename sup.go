@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -56,14 +57,25 @@ func checkEndpoint(endpoint string, tries uint, wg *sync.WaitGroup, ch chan<- Ch
 		triesArg = "-c"
 	}
 
-	output, err := exec.Command("ping", endpoint, fmt.Sprintf("%s %d", triesArg, tries)).Output()
+	output, err := exec.Command("ping", endpoint, triesArg, strconv.Itoa(int(tries))).Output()
 
 	if err != nil {
 		ch <- CheckResult{endpoint, err, false}
 		return
 	}
 
-	successOutput := fmt.Sprintf("%d packets transmitted, %d packets received", tries, tries)
+	successOutputLinux := fmt.Sprintf("%d packets transmitted, %d received", tries, tries)
+	successOutputMac := fmt.Sprintf("%d packets transmitted, %d packets received", tries, tries)
+	successOutputWindows := fmt.Sprintf("    Packets: Sent = %d, Received = %d", tries, tries)
+
+	var successOutput string
+	if os == "windows" {
+		successOutput = successOutputWindows
+	} else if os == "darwin" {
+		successOutput = successOutputMac
+	} else {
+		successOutput = successOutputLinux
+	}
 
 	if !strings.Contains(string(output), successOutput) {
 		errMsg := fmt.Errorf("%s failed to return all packets", endpoint)
