@@ -5,10 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os/exec"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 )
@@ -50,40 +48,32 @@ func checkOS() (string, error) {
 func checkEndpoint(endpoint string, tries uint, wg *sync.WaitGroup, ch chan<- CheckResult, os string) {
 	defer wg.Done()
 
-	var triesArg string
-	if os == "windows" {
-		triesArg = "-n"
-	} else {
-		triesArg = "-c"
-	}
-
-	output, err := exec.Command("ping", endpoint, triesArg, strconv.Itoa(int(tries))).Output()
+	_, err := ping(endpoint, 3)
 
 	if err != nil {
 		ch <- CheckResult{endpoint, err, false}
 		return
 	}
+	// successOutputMac := fmt.Sprintf("%d packets transmitted, %d packets received", tries, tries)
+	// successOutputWindows := fmt.Sprintf("    Packets: Sent = %d, Received = %d", tries, tries)
 
-	successOutputLinux := fmt.Sprintf("%d packets transmitted, %d received", tries, tries)
-	successOutputMac := fmt.Sprintf("%d packets transmitted, %d packets received", tries, tries)
-	successOutputWindows := fmt.Sprintf("    Packets: Sent = %d, Received = %d", tries, tries)
+	// var successOutput string
+	// if os == "windows" {
+	// 	successOutput = successOutputWindows
+	// } else if os == "darwin" {
+	// 	successOutput = successOutputMac
+	// } else {
+	// 	successOutput = successOutputLinux
+	// }
 
-	var successOutput string
-	if os == "windows" {
-		successOutput = successOutputWindows
-	} else if os == "darwin" {
-		successOutput = successOutputMac
-	} else {
-		successOutput = successOutputLinux
-	}
-
-	if !strings.Contains(string(output), successOutput) {
-		errMsg := fmt.Errorf("%s failed to return all packets", endpoint)
-		ch <- CheckResult{endpoint, errMsg, false}
-		return
-	}
+	// if !strings.Contains(string(output), successOutput) {
+	// 	errMsg := fmt.Errorf("%s failed to return all packets", endpoint)
+	// 	ch <- CheckResult{endpoint, errMsg, false}
+	// 	return
+	// }
 
 	ch <- CheckResult{endpoint, nil, true}
+
 }
 
 // checkEndpoints asynchronously checks if the provided endpoints are up and returns a slice of the results.
@@ -104,6 +94,8 @@ func checkEndpoints(endpoints []string, os string, tries uint) []CheckResult {
 	for r := range resultChannel {
 		results = append(results, r)
 	}
+
+	fmt.Print(results)
 
 	return results
 }
@@ -150,6 +142,8 @@ func checkAndSummarizeEndpoints(endpoints []string, os string, tries uint) Check
 
 // sendSummaryMessageToTeams sends an endpoint checks summary message to a Microsoft Teams channel via a webhook.
 func sendSummaryMessageToTeams(webhookUrlSuccess string, webhookUrlFailure string, checkSummary CheckSummary) error {
+	return nil
+
 	var color, title string
 	success := false
 	if checkSummary.AllUp {
