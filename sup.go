@@ -48,29 +48,13 @@ func checkOS() (string, error) {
 func checkEndpoint(endpoint string, tries uint, wg *sync.WaitGroup, ch chan<- CheckResult, os string) {
 	defer wg.Done()
 
+	// returns a number of tries summary -- not used
 	_, err := ping(endpoint, 3)
 
 	if err != nil {
 		ch <- CheckResult{endpoint, err, false}
 		return
 	}
-	// successOutputMac := fmt.Sprintf("%d packets transmitted, %d packets received", tries, tries)
-	// successOutputWindows := fmt.Sprintf("    Packets: Sent = %d, Received = %d", tries, tries)
-
-	// var successOutput string
-	// if os == "windows" {
-	// 	successOutput = successOutputWindows
-	// } else if os == "darwin" {
-	// 	successOutput = successOutputMac
-	// } else {
-	// 	successOutput = successOutputLinux
-	// }
-
-	// if !strings.Contains(string(output), successOutput) {
-	// 	errMsg := fmt.Errorf("%s failed to return all packets", endpoint)
-	// 	ch <- CheckResult{endpoint, errMsg, false}
-	// 	return
-	// }
 
 	ch <- CheckResult{endpoint, nil, true}
 
@@ -94,8 +78,6 @@ func checkEndpoints(endpoints []string, os string, tries uint) []CheckResult {
 	for r := range resultChannel {
 		results = append(results, r)
 	}
-
-	fmt.Print(results)
 
 	return results
 }
@@ -142,7 +124,6 @@ func checkAndSummarizeEndpoints(endpoints []string, os string, tries uint) Check
 
 // sendSummaryMessageToTeams sends an endpoint checks summary message to a Microsoft Teams channel via a webhook.
 func sendSummaryMessageToTeams(webhookUrlSuccess string, webhookUrlFailure string, checkSummary CheckSummary) error {
-	return nil
 
 	var color, title string
 	success := false
