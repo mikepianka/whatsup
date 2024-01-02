@@ -5,6 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os/exec"
+	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -15,6 +19,7 @@ type Config struct {
 	TeamsWebhookUrlFailure string   `json:"teamsWebhookUrlFailure"`
 	Endpoints              []string `json:"endpoints"`
 	Tries                  int      `json:"tries"`
+	OSPing                 bool     `json:"osPing"`
 }
 
 // CheckResult holds endpoint ping results.
@@ -30,12 +35,72 @@ type CheckSummary struct {
 	Msg   string
 }
 
+// checkOS checks that the current runtime OS is mac, linux, or windows.
+func checkOS() (string, error) {
+	testedOS := []string{"darwin", "linux", "windows"}
+	os := runtime.GOOS
+
+	if slices.Contains(testedOS, os) {
+		return os, nil
+	} else {
+		return os, fmt.Errorf("untested OS: %s", os)
+	}
+}
+
 // checkEndpoint checks if the provided endpoint is up and writes the result to the provided channel.
-func checkEndpoint(endpoint string, tries int, wg *sync.WaitGroup, ch chan<- CheckResult) {
+func checkEndpointPing(endpoint string, tries int, wg *sync.WaitGroup, ch chan<- CheckResult, os string) {
+	defer wg.Done()
+
+	var triesArg string
+	if os == "windows" {
+		triesArg = "-n"
+	} else {
+		triesArg = "-c"
+	}
+
+	output, err := exec.Command("ping", endpoint, triesArg, strconv.Itoa(int(tries))).Output()
+
+	if err != nil {
+		ch <- CheckResult{endpoint, err, false}
+		return
+	}
+
+	successOutputLinux := fmt.Sprintf("%d packets transmitted, %d received", tries, tries)
+	successOutputMac := fmt.Sprintf("%d packets transmitted, %d packets received", tries, tries)
+	successOutputWindows := fmt.Sprintf("    Packets: Sent = %d, Received = %d", tries, tries)
+
+	var successOutput string
+	if os == "windows" {
+		successOutput = successOutputWindows
+	} else if os == "darwin" {
+		successOutput = successOutputMac
+	} else {
+		successOutput = successOutputLinux
+	}
+
+	if !strings.Contains(string(output), successOutput) {
+		errMsg := fmt.Errorf("%s failed to return all packets", endpoint)
+		ch <- CheckResult{endpoint, errMsg, false}
+		return
+	}
+
+	ch <- CheckResult{endpoint, nil, true}
+}
+
+func checkEndpoint(endpoint string, tries int, wg *sync.WaitGroup, ch chan<- CheckResult, os string, osPing bool) {
+	if osPing {
+		checkEndpointPing(endpoint, tries, wg, ch, os)
+	} else {
+		checkEndpointHttpPing(endpoint, tries, wg, ch)
+	}
+}
+
+// checkEndpoint checks if the provided endpoint is up and writes the result to the provided channel.
+func checkEndpointHttpPing(endpoint string, tries int, wg *sync.WaitGroup, ch chan<- CheckResult) {
 	defer wg.Done()
 
 	// returns a number of tries summary -- not used
-	_, err := ping(endpoint, tries)
+	_, err := httpPing(endpoint, tries)
 
 	if err != nil {
 		ch <- CheckResult{endpoint, err, false}
@@ -47,13 +112,13 @@ func checkEndpoint(endpoint string, tries int, wg *sync.WaitGroup, ch chan<- Che
 }
 
 // checkEndpoints asynchronously checks if the provided endpoints are up and returns a slice of the results.
-func checkEndpoints(endpoints []string, tries int) []CheckResult {
+func checkEndpoints(endpoints []string, os string, tries int, osPing bool) []CheckResult {
 	var wg sync.WaitGroup
 	resultChannel := make(chan CheckResult, len(endpoints))
 
 	for _, ept := range endpoints {
 		wg.Add(1)
-		go checkEndpoint(ept, tries, &wg, resultChannel)
+		go checkEndpoint(ept, tries, &wg, resultChannel, os, osPing)
 	}
 
 	wg.Wait()
@@ -88,8 +153,8 @@ func filterDownEndpoints(results []CheckResult) ([]CheckResult, error) {
 }
 
 // checkAndSummarizeEndpoints checks the provided endpoints and returns a summary of their up or down status.
-func checkAndSummarizeEndpoints(endpoints []string, tries int) CheckSummary {
-	results := checkEndpoints(endpoints, tries)
+func checkAndSummarizeEndpoints(endpoints []string, os string, tries int, osPing bool) CheckSummary {
+	results := checkEndpoints(endpoints, os, tries, osPing)
 
 	downResults, err := filterDownEndpoints(results)
 
@@ -167,11 +232,16 @@ func sendSummaryMessageToTeams(webhookUrlSuccess string, webhookUrlFailure strin
 
 // Sup checks whether the provided endpoints are up or down and then posts a summary message to the provided Teams webhook.
 func Sup(cfg Config) error {
-	checkSummary := checkAndSummarizeEndpoints(cfg.Endpoints, cfg.Tries)
+	os, err := checkOS()
+	if err != nil {
+		return err
+	}
+
+	checkSummary := checkAndSummarizeEndpoints(cfg.Endpoints, os, cfg.Tries, cfg.OSPing)
 
 	fmt.Println(checkSummary.Msg)
 
-	err := sendSummaryMessageToTeams(cfg.TeamsWebhookUrlSuccess, cfg.TeamsWebhookUrlFailure, checkSummary)
+	err = sendSummaryMessageToTeams(cfg.TeamsWebhookUrlSuccess, cfg.TeamsWebhookUrlFailure, checkSummary)
 
 	if err != nil {
 		return fmt.Errorf("error sending message: %v", err)
