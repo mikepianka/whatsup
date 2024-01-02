@@ -158,8 +158,15 @@ func checkAndSummarizeEndpoints(endpoints []string, os string, tries int, osPing
 
 	downResults, err := filterDownEndpoints(results)
 
+	osUsed := func() string {
+		if osPing {
+			return "Results were checked using OS Ping"
+		}
+		return "Results were checked using Go HTTP requests"
+	}
+
 	if err == nil {
-		return CheckSummary{AllUp: true, Msg: fmt.Sprintf("All %d endpoints are up.", len(results))}
+		return CheckSummary{AllUp: true, Msg: fmt.Sprintf("All %d endpoints are up. %v", len(results), osUsed())}
 	}
 
 	var msg strings.Builder
