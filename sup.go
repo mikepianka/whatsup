@@ -47,10 +47,8 @@ func checkOS() (string, error) {
 	}
 }
 
-// checkEndpoint checks if the provided endpoint is up and writes the result to the provided channel.
-func checkEndpointPing(endpoint string, tries int, wg *sync.WaitGroup, ch chan<- CheckResult, os string) {
-	defer wg.Done()
-
+// checkEndpointPing checks if the provided endpoint is up using the native OS's ping command and writes the result to the provided channel.
+func checkEndpointPing(endpoint string, tries int, ch chan<- CheckResult, os string) {
 	var triesArg string
 	if os == "windows" {
 		triesArg = "-n"
@@ -87,18 +85,8 @@ func checkEndpointPing(endpoint string, tries int, wg *sync.WaitGroup, ch chan<-
 	ch <- CheckResult{endpoint, nil, true}
 }
 
-func checkEndpoint(endpoint string, tries int, wg *sync.WaitGroup, ch chan<- CheckResult, os string, osPing bool) {
-	if osPing {
-		checkEndpointPing(endpoint, tries, wg, ch, os)
-	} else {
-		checkEndpointHttpPing(endpoint, tries, wg, ch)
-	}
-}
-
-// checkEndpoint checks if the provided endpoint is up and writes the result to the provided channel.
-func checkEndpointHttpPing(endpoint string, tries int, wg *sync.WaitGroup, ch chan<- CheckResult) {
-	defer wg.Done()
-
+// checkEndpointHttps checks if the provided endpoint is up using a https request and writes the result to the provided channel.
+func checkEndpointHttps(endpoint string, tries int, ch chan<- CheckResult) {
 	// returns a number of tries summary -- not used
 	_, err := httpPing(endpoint, tries)
 
@@ -108,7 +96,15 @@ func checkEndpointHttpPing(endpoint string, tries int, wg *sync.WaitGroup, ch ch
 	}
 
 	ch <- CheckResult{endpoint, nil, true}
+}
 
+// checkEndpoint checks if the provided endpoint is up using either a native OS ping or https request depending on the provided value of osPing.
+func checkEndpoint(endpoint string, tries int, ch chan<- CheckResult, os string, osPing bool) {
+	if osPing {
+		checkEndpointPing(endpoint, tries, ch, os)
+	} else {
+		checkEndpointHttps(endpoint, tries, ch)
+	}
 }
 
 // checkEndpoints asynchronously checks if the provided endpoints are up and returns a slice of the results.
@@ -118,7 +114,10 @@ func checkEndpoints(endpoints []string, os string, tries int, osPing bool) []Che
 
 	for _, ept := range endpoints {
 		wg.Add(1)
-		go checkEndpoint(ept, tries, &wg, resultChannel, os, osPing)
+		go func(ept string) {
+			defer wg.Done()
+			checkEndpoint(ept, tries, resultChannel, os, osPing)
+		}(ept)
 	}
 
 	wg.Wait()
