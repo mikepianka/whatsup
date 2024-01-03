@@ -85,13 +85,33 @@ func checkEndpointPing(endpoint string, tries int, ch chan<- CheckResult, os str
 	ch <- CheckResult{endpoint, nil, true}
 }
 
-// checkEndpointHttps checks if the provided endpoint is up using a https request and writes the result to the provided channel.
+// checkEndpointHttps checks if the provided endpoint is up using a https GET request and writes the result to the provided channel.
 func checkEndpointHttps(endpoint string, tries int, ch chan<- CheckResult) {
-	// returns a number of tries summary -- not used
-	_, err := httpPing(endpoint, tries)
+	successfulAttempts := 0
 
-	if err != nil {
-		ch <- CheckResult{endpoint, err, false}
+	for i := 0; i < tries; i++ {
+		resp, err := http.Get("https://" + endpoint)
+
+		if err != nil {
+			// Error making the request, the endpoint is considered down
+			// fmt.Printf("Endpoint: %v Attempt %d: Error - %v\n", endpoint, i+1, err)
+			continue
+		}
+
+		// 403 = forbidden which means server is responding
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusForbidden {
+			// fmt.Printf("Endpoint: %v Attempt %d: Status Code - %d\n", endpoint, i+1, resp.StatusCode)
+			continue
+		}
+
+		// The endpoint is up
+		// fmt.Printf("Endpoint: %v Attempt %d: Success\n", endpoint, i+1)
+		successfulAttempts++
+	}
+
+	if successfulAttempts != tries {
+		errMsg := fmt.Errorf("%s was not up for all %d attempts", endpoint, tries)
+		ch <- CheckResult{endpoint, errMsg, false}
 		return
 	}
 
@@ -157,15 +177,16 @@ func checkAndSummarizeEndpoints(endpoints []string, os string, tries int, osPing
 
 	downResults, err := filterDownEndpoints(results)
 
-	osUsed := func() string {
-		if osPing {
-			return "Results were checked using OS Ping"
-		}
-		return "Results were checked using Go HTTP requests"
+	var checkMethod string
+
+	if osPing {
+		checkMethod = "ping"
+	} else {
+		checkMethod = "HTTPS GET"
 	}
 
 	if err == nil {
-		return CheckSummary{AllUp: true, Msg: fmt.Sprintf("All %d endpoints are up. %v", len(results), osUsed())}
+		return CheckSummary{AllUp: true, Msg: fmt.Sprintf("All %d endpoints are up, and were checked using %s.", len(results), checkMethod)}
 	}
 
 	var msg strings.Builder
