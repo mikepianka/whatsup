@@ -18,7 +18,8 @@ type Config struct {
 	TeamsWebhookUrlSuccess string   `json:"teamsWebhookUrlSuccess"`
 	TeamsWebhookUrlFailure string   `json:"teamsWebhookUrlFailure"`
 	Endpoints              []string `json:"endpoints"`
-	Tries                  uint     `json:"tries"`
+	Tries                  int      `json:"tries"`
+	Https                  bool     `json:"https"`
 }
 
 // CheckResult holds endpoint ping results.
@@ -46,10 +47,8 @@ func checkOS() (string, error) {
 	}
 }
 
-// checkEndpoint checks if the provided endpoint is up and writes the result to the provided channel.
-func checkEndpoint(endpoint string, tries uint, wg *sync.WaitGroup, ch chan<- CheckResult, os string) {
-	defer wg.Done()
-
+// checkEndpointPing checks if the provided endpoint is up using the native OS's ping command and writes the result to the provided channel.
+func checkEndpointPing(endpoint string, tries int, ch chan<- CheckResult, os string) {
 	var triesArg string
 	if os == "windows" {
 		triesArg = "-n"
@@ -86,14 +85,59 @@ func checkEndpoint(endpoint string, tries uint, wg *sync.WaitGroup, ch chan<- Ch
 	ch <- CheckResult{endpoint, nil, true}
 }
 
+// checkEndpointHttps checks if the provided endpoint is up using a https GET request and writes the result to the provided channel.
+func checkEndpointHttps(endpoint string, tries int, ch chan<- CheckResult) {
+	successfulAttempts := 0
+
+	for i := 0; i < tries; i++ {
+		resp, err := http.Get("https://" + endpoint)
+
+		if err != nil {
+			// Error making the request, the endpoint is considered down
+			// fmt.Printf("Endpoint: %v Attempt %d: Error - %v\n", endpoint, i+1, err)
+			continue
+		}
+
+		// 403 = forbidden which means server is responding
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusForbidden {
+			// fmt.Printf("Endpoint: %v Attempt %d: Status Code - %d\n", endpoint, i+1, resp.StatusCode)
+			continue
+		}
+
+		// The endpoint is up
+		// fmt.Printf("Endpoint: %v Attempt %d: Success\n", endpoint, i+1)
+		successfulAttempts++
+	}
+
+	if successfulAttempts != tries {
+		errMsg := fmt.Errorf("%s was not up for all %d attempts", endpoint, tries)
+		ch <- CheckResult{endpoint, errMsg, false}
+		return
+	}
+
+	ch <- CheckResult{endpoint, nil, true}
+}
+
+// checkEndpoint checks if the provided endpoint is up using either a native OS ping or https request depending on the provided value of https.
+func checkEndpoint(endpoint string, tries int, ch chan<- CheckResult, os string, https bool) {
+	if https {
+		checkEndpointHttps(endpoint, tries, ch)
+	} else {
+		checkEndpointPing(endpoint, tries, ch, os)
+	}
+}
+
 // checkEndpoints asynchronously checks if the provided endpoints are up and returns a slice of the results.
-func checkEndpoints(endpoints []string, os string, tries uint) []CheckResult {
+func checkEndpoints(endpoints []string, os string, tries int, https bool) []CheckResult {
 	var wg sync.WaitGroup
 	resultChannel := make(chan CheckResult, len(endpoints))
 
 	for _, ept := range endpoints {
 		wg.Add(1)
-		go checkEndpoint(ept, tries, &wg, resultChannel, os)
+		go func(ept string) {
+			defer wg.Done()
+			checkEndpoint(ept, tries, resultChannel, os, https)
+		}(ept)
 	}
 
 	wg.Wait()
@@ -128,13 +172,21 @@ func filterDownEndpoints(results []CheckResult) ([]CheckResult, error) {
 }
 
 // checkAndSummarizeEndpoints checks the provided endpoints and returns a summary of their up or down status.
-func checkAndSummarizeEndpoints(endpoints []string, os string, tries uint) CheckSummary {
-	results := checkEndpoints(endpoints, os, tries)
+func checkAndSummarizeEndpoints(endpoints []string, os string, tries int, https bool) CheckSummary {
+	results := checkEndpoints(endpoints, os, tries, https)
 
 	downResults, err := filterDownEndpoints(results)
 
+	var checkMethod string
+
+	if https {
+		checkMethod = "HTTPS GET"
+	} else {
+		checkMethod = "Ping"
+	}
+
 	if err == nil {
-		return CheckSummary{AllUp: true, Msg: fmt.Sprintf("All %d endpoints are up.", len(results))}
+		return CheckSummary{AllUp: true, Msg: fmt.Sprintf("All %d endpoints are up, and were checked using %s.", len(results), checkMethod)}
 	}
 
 	var msg strings.Builder
@@ -150,6 +202,7 @@ func checkAndSummarizeEndpoints(endpoints []string, os string, tries uint) Check
 
 // sendSummaryMessageToTeams sends an endpoint checks summary message to a Microsoft Teams channel via a webhook.
 func sendSummaryMessageToTeams(webhookUrlSuccess string, webhookUrlFailure string, checkSummary CheckSummary) error {
+
 	var color, title string
 	success := false
 	if checkSummary.AllUp {
@@ -211,7 +264,7 @@ func Sup(cfg Config) error {
 		return err
 	}
 
-	checkSummary := checkAndSummarizeEndpoints(cfg.Endpoints, os, cfg.Tries)
+	checkSummary := checkAndSummarizeEndpoints(cfg.Endpoints, os, cfg.Tries, cfg.Https)
 
 	fmt.Println(checkSummary.Msg)
 

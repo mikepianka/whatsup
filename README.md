@@ -19,7 +19,7 @@ Next, make two Microsoft Teams channels for successes and failures and enable in
 
 ## How it works
 
-When the tool runs, it will use the operating system's built in `ping` command (Linux, Mac, or Windows) to check if each endpoint is up or down. _tries_ is the number of ping attempts per endpoint and all ping attempts must be successful for the endpoint to be considered up (so if you have _tries_ set to 3, and 2 pings to an endpoint succeed but the third fails, the endpoint is considered down). The status of the endpoint checks is sent to Microsoft Teams via the success or failure webhooks depending if all endpoints were up or not.
+When the tool runs it will use the operating system's built in `ping` command (Linux, Mac, or Windows) to check if each endpoint is up or down. When passed with config `"https": true` it will use the native golang http/net lib to test if there is a valid response from the endpoint using an HTTPS GET request. _tries_ is the number of ping attempts per endpoint and all ping attempts must be successful for the endpoint to be considered up (so if you have _tries_ set to 3, and 2 pings to an endpoint succeed but the third fails, the endpoint is considered down). The status of the endpoint checks is sent to Microsoft Teams via the success or failure webhooks depending if all endpoints were up or not.
 
 The common use case is to have this tool run on a scheduled interval, so by using two channels you can mute the success channel and just have notifications active for the failure channel. This way you can check the success channel occasionally to make sure the tool is running, but only get actively notified if an endpoint is down.
 
