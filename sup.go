@@ -180,9 +180,9 @@ func checkAndSummarizeEndpoints(endpoints []string, os string, tries int, https 
 	var checkMethod string
 
 	if https {
-		checkMethod = "ping"
-	} else {
 		checkMethod = "HTTPS GET"
+	} else {
+		checkMethod = "Ping"
 	}
 
 	if err == nil {
