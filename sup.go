@@ -19,7 +19,7 @@ type Config struct {
 	TeamsWebhookUrlFailure string   `json:"teamsWebhookUrlFailure"`
 	Endpoints              []string `json:"endpoints"`
 	Tries                  int      `json:"tries"`
-	OSPing                 bool     `json:"osPing"`
+	Https                  bool     `json:"https"`
 }
 
 // CheckResult holds endpoint ping results.
@@ -118,17 +118,17 @@ func checkEndpointHttps(endpoint string, tries int, ch chan<- CheckResult) {
 	ch <- CheckResult{endpoint, nil, true}
 }
 
-// checkEndpoint checks if the provided endpoint is up using either a native OS ping or https request depending on the provided value of osPing.
-func checkEndpoint(endpoint string, tries int, ch chan<- CheckResult, os string, osPing bool) {
-	if osPing {
-		checkEndpointPing(endpoint, tries, ch, os)
-	} else {
+// checkEndpoint checks if the provided endpoint is up using either a native OS ping or https request depending on the provided value of https.
+func checkEndpoint(endpoint string, tries int, ch chan<- CheckResult, os string, https bool) {
+	if https {
 		checkEndpointHttps(endpoint, tries, ch)
+	} else {
+		checkEndpointPing(endpoint, tries, ch, os)
 	}
 }
 
 // checkEndpoints asynchronously checks if the provided endpoints are up and returns a slice of the results.
-func checkEndpoints(endpoints []string, os string, tries int, osPing bool) []CheckResult {
+func checkEndpoints(endpoints []string, os string, tries int, https bool) []CheckResult {
 	var wg sync.WaitGroup
 	resultChannel := make(chan CheckResult, len(endpoints))
 
@@ -136,7 +136,7 @@ func checkEndpoints(endpoints []string, os string, tries int, osPing bool) []Che
 		wg.Add(1)
 		go func(ept string) {
 			defer wg.Done()
-			checkEndpoint(ept, tries, resultChannel, os, osPing)
+			checkEndpoint(ept, tries, resultChannel, os, https)
 		}(ept)
 	}
 
@@ -172,14 +172,14 @@ func filterDownEndpoints(results []CheckResult) ([]CheckResult, error) {
 }
 
 // checkAndSummarizeEndpoints checks the provided endpoints and returns a summary of their up or down status.
-func checkAndSummarizeEndpoints(endpoints []string, os string, tries int, osPing bool) CheckSummary {
-	results := checkEndpoints(endpoints, os, tries, osPing)
+func checkAndSummarizeEndpoints(endpoints []string, os string, tries int, https bool) CheckSummary {
+	results := checkEndpoints(endpoints, os, tries, https)
 
 	downResults, err := filterDownEndpoints(results)
 
 	var checkMethod string
 
-	if osPing {
+	if https {
 		checkMethod = "ping"
 	} else {
 		checkMethod = "HTTPS GET"
@@ -264,7 +264,7 @@ func Sup(cfg Config) error {
 		return err
 	}
 
-	checkSummary := checkAndSummarizeEndpoints(cfg.Endpoints, os, cfg.Tries, cfg.OSPing)
+	checkSummary := checkAndSummarizeEndpoints(cfg.Endpoints, os, cfg.Tries, cfg.Https)
 
 	fmt.Println(checkSummary.Msg)
 
